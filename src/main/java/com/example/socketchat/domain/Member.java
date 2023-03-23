@@ -8,16 +8,20 @@ import org.springframework.web.socket.WebSocketSession;
 public class Member {
 
     private final String id;
-    private final String name;
-    private final WebSocketSession session;
+    private String name;
+    private WebSocketSession session;
 
-    private Member(String name, WebSocketSession session) {
+    private Member(String name) {
         this.id = UUID.randomUUID().toString();
         this.name = name;
-        this.session = session;
     }
 
-    public static Member create(String name, WebSocketSession session) {
-        return new Member(name, session);
+    public static Member create(String name) {
+        return new Member(name);
+    }
+
+    public Member updateName(String name) {
+        this.name = name;
+        return this;
     }
 }
