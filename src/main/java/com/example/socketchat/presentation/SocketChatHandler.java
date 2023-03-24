@@ -5,6 +5,7 @@ import com.example.socketchat.presentation.dto.MessageRequestDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -29,10 +30,16 @@ public class SocketChatHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws IOException {
         socketChatService.joinRoom(session);
+
+        TextMessage message = new TextMessage("connected on server");
+        session.sendMessage(message);
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws IOException {
         socketChatService.outRoom(session);
+
+        TextMessage message = new TextMessage("connection closed");
+        session.sendMessage(message);
     }
 }

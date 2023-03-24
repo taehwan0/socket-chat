@@ -4,14 +4,14 @@ import com.example.socketchat.domain.ChatMessage;
 import com.example.socketchat.domain.ChatMessage.MessageType;
 import com.example.socketchat.domain.ChatRoom;
 import com.example.socketchat.domain.Member;
+import com.example.socketchat.domain.repository.ChatRoomRepository;
 import com.example.socketchat.domain.repository.MemberRepository;
 import com.example.socketchat.presentation.dto.MessageRequestDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
-import java.util.Random;
-import javax.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -21,72 +21,63 @@ import org.springframework.web.socket.WebSocketSession;
 @Service
 public class SocketChatService {
 
-    private static final String[] firstNames = {"빨간색", "주황색", "노란색", "초록색", "파란색", "남색", "보라색"};
-    private static final String[] lastNames = {"강아지", "고앙이", "코끼리", "말", "하마", "쥐", "새"};
-
     private final ObjectMapper objectMapper;
+    private final ChatRoomRepository chatRoomRepository;
     private final MemberRepository memberRepository;
 
-    private ChatRoom room;
-
-    @PostConstruct
-    public void init() {
-        this.room = ChatRoom.create("room");
-    }
-
     public void postMessage(WebSocketSession session, MessageRequestDto messageRequestDto) throws IOException {
-        Member member = memberRepository.findById(session.getId())
-            .orElseThrow(() -> new RuntimeException("NotFoundMember"));
-
+        // 메세지 보내는 로직
+        // 아직 메세지 저장은 안해요~
+        String roomId = messageRequestDto.getRoomId();
         String content = messageRequestDto.getContent();
-        ChatMessage message = ChatMessage.create(member.getName(), this.room.getId(), content, MessageType.MESSAGE);
-        TextMessage textMessage = new TextMessage(objectMapper.writeValueAsString(message));
 
-        for (WebSocketSession roomSession : this.room.getSessions()) {
-            roomSession.sendMessage(textMessage);
-        }
-    }
+        ChatRoom chatRoom = chatRoomRepository.findById(roomId)
+            .orElseThrow(() -> new RuntimeException("NotFoundChatRoom"));
 
-    public void joinRoom(WebSocketSession session) throws IOException {
-        ChatRoom room = this.room.join(session);
-
-        String randomNickname = createRandomNickname();
-        Member member = Member.create(randomNickname, session);
-
-        memberRepository.save(member);
-
-        log.info("JOIN room[{}]: {}[{}]", room.getName(), member.getName(), session.getId());
-
-        String content = member.getName() + "님이 참여했습니다.";
-        ChatMessage message = ChatMessage.create("NOTIFY", this.room.getId(), content, MessageType.NOTIFY);
-        TextMessage textMessage = new TextMessage(objectMapper.writeValueAsString(message));
-
-        for (WebSocketSession roomSession : this.room.getSessions()) {
-            roomSession.sendMessage(textMessage);
-        }
-    }
-
-    private String createRandomNickname() {
-        Random random = new Random();
-        int headIndex = random.nextInt(7);
-        int tailIndex = random.nextInt(7);
-
-        return firstNames[headIndex] + " " + lastNames[tailIndex];
-    }
-
-    public void outRoom(WebSocketSession session) throws IOException {
-        ChatRoom room = this.room.out(session);
-        Member member = memberRepository.delete(session.getId())
+        String memberId = session.getHandshakeHeaders().getFirst("member_id");
+        Member sender = memberRepository.findById(memberId)
             .orElseThrow(() -> new RuntimeException("NotFoundMember"));
 
-        log.info("OUT room[{}]: {}[{}]", room.getName(), member.getName(), session.getId());
+        ChatMessage chatMessage = ChatMessage.create(sender.getName(), chatRoom.getName(), content, MessageType.MESSAGE);
+        String messageAsString = objectMapper.writeValueAsString(chatMessage);
+        TextMessage message = new TextMessage(messageAsString);
 
-        String content = member.getName() + "님이 나갔습니다.";
-        ChatMessage message = ChatMessage.create("NOTIFY", this.room.getId(), content, MessageType.NOTIFY);
-        TextMessage textMessage = new TextMessage(objectMapper.writeValueAsString(message));
+        chatRoom.getMembers().forEach(member -> {
+            member.getSessions().forEach(s -> {
+                try {
+                    s.sendMessage(message);
+                } catch (IOException e) {
+                    log.error("message error: {}", s);
+                }
+            });
+        });
 
-        for (WebSocketSession roomSession : this.room.getSessions()) {
-            roomSession.sendMessage(textMessage);
+
+    }
+
+    public void joinRoom(WebSocketSession session) {
+        // 해당 유저에 session 추가하는 로직
+        Member member = validateSocketSession(session);
+
+        member.addSession(session);
+    }
+
+    public void outRoom(WebSocketSession session) {
+        // 해당 유저에 session 제거하는 로직
+        Member member = validateSocketSession(session);
+
+        member.removeSession(session);
+    }
+
+    private Member validateSocketSession(WebSocketSession session) {
+        HttpHeaders httpHeaders = session.getHandshakeHeaders();
+        String memberId = httpHeaders.getFirst("member_id");
+
+        if (memberId == null) {
+            throw new RuntimeException("NeedMemberId");
         }
+
+        return memberRepository.findById(memberId)
+            .orElseThrow(() -> new RuntimeException("NotFoundMember"));
     }
 }
